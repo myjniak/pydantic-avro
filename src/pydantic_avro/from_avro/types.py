@@ -25,9 +25,12 @@ AVRO_TO_PY_MAPPING = {
 }
 
 
-def list_type_handler(t: dict) -> str:
+def list_type_handler(t: dict, parent_name: str = "") -> str:
     """Get the Python type of a given Avro list type"""
     l = t["type"]
+    for e in l:
+        if "name" in e:
+            e["name"] = parent_name + "_" + e["name"]
     if "null" in l and len(l) == 2:
         c = l.copy()
         c.remove("null")
@@ -37,7 +40,7 @@ def list_type_handler(t: dict) -> str:
     return f"Union[{','.join([get_pydantic_type(e) for e in l])}]"
 
 
-def map_type_handler(t: dict) -> str:
+def map_type_handler(t: dict, parent_name: str = "") -> str:
     """Get the Python type of a given Avro map type"""
 
     avro_value_type = t["type"].get("values")
@@ -49,12 +52,12 @@ def map_type_handler(t: dict) -> str:
     return f"Dict[str, {value_type}]"
 
 
-def logical_type_handler(t: dict) -> str:
+def logical_type_handler(t: dict, parent_name: str = "") -> str:
     """Get the Python type of a given Avro logical type"""
     return LOGICAL_TYPES[t["type"]["logicalType"]]
 
 
-def enum_type_handler(t: dict) -> str:
+def enum_type_handler(t: dict, parent_name: str = "") -> str:
     """Gets the enum type of a given Avro enum type and adds it to the class registry"""
     name = t["type"].get("name")
     if not ClassRegistry().has_class(name):
@@ -65,7 +68,7 @@ def enum_type_handler(t: dict) -> str:
     return name
 
 
-def array_type_handler(t: dict) -> str:
+def array_type_handler(t: dict, parent_name: str = "") -> str:
     """Get the Python type of a given Avro array type"""
     if isinstance(t["type"], dict):
         sub_type = get_pydantic_type(t["type"]["items"])
@@ -74,12 +77,12 @@ def array_type_handler(t: dict) -> str:
     return f"List[{sub_type}]"
 
 
-def record_type_handler(t: dict) -> str:
+def record_type_handler(t: dict, parent_name: str = "") -> str:
     """Gets the record type of a given Avro record type and adds it to the class registry"""
     t = t["type"] if isinstance(t["type"], dict) else t
-    name = t["name"]
+    name = parent_name + t["name"]
     fields = t["fields"] if "fields" in t else t["type"]["fields"]
-    field_strings = [generate_field_string(field) for field in fields]
+    field_strings = [generate_field_string(field, name) for field in fields]
     class_body = "\n".join(field_strings) if field_strings else "    pass"
     current = f"class {name}(BaseModel):\n{class_body}\n"
     ClassRegistry().add_class(name, current)
@@ -96,10 +99,10 @@ TYPE_HANDLERS = {
 }
 
 
-def generate_field_string(field: dict) -> str:
+def generate_field_string(field: dict, parent_name: str = "") -> str:
     """Generate a string representing a field in the Pydantic model."""
     n = field["name"]
-    t = get_pydantic_type(field)
+    t = get_pydantic_type(field, parent_name=parent_name)
     default = field.get("default")
     if field["type"] == "int" and "default" in field and isinstance(default, (bool, type(None))):
         return f"    {n}: {t} = Field({default}, ge=-2**31, le=(2**31 - 1))"
@@ -115,7 +118,7 @@ def generate_field_string(field: dict) -> str:
         return f"    {n}: {t} = {json.dumps(default)}"
 
 
-def get_pydantic_type(t: Union[str, dict]) -> str:
+def get_pydantic_type(t: Union[str, dict], parent_name: str = "") -> str:
     """Get the Pydantic type for a given Avro type"""
     if isinstance(t, str):
         t = {"type": t}
@@ -127,7 +130,7 @@ def get_pydantic_type(t: Union[str, dict]) -> str:
         if t["type"] in AVRO_TO_PY_MAPPING:
             return AVRO_TO_PY_MAPPING[t["type"]]
 
-    return get_type_handler(t)(t)
+    return get_type_handler(t)(t, parent_name)
 
 
 def get_type_handler(t: dict) -> Callable:
